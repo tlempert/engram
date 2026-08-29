@@ -19,8 +19,9 @@ export interface ProbeResult {
   skipped: number;
 }
 
-function idExistsInZettel(db: Database, id: string): boolean {
-  const row = db.prepare("SELECT 1 FROM notes WHERE id = ? AND zone = 'zettel' LIMIT 1").get(id);
+/** Probes may reference notes by id or by title — titles survive promotion, ids do not. */
+function idExistsInZettel(db: Database, ref: string): boolean {
+  const row = db.prepare("SELECT 1 FROM notes WHERE (id = ? OR title = ?) AND zone = 'zettel' LIMIT 1").get(ref, ref);
   return row != null;
 }
 
@@ -31,7 +32,7 @@ function violates(entry: string, items: BundleItem[]): boolean {
     const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : null;
     return items.some((i) => (prefix !== null ? i.scope.startsWith(prefix) : i.scope === pattern));
   }
-  return items.some((i) => i.id === entry);
+  return items.some((i) => i.id === entry || i.title === entry);
 }
 
 export function runProbes(db: Database, probes: Probe[]): ProbeResult {
@@ -52,8 +53,8 @@ export function runProbes(db: Database, probes: Probe[]): ProbeResult {
     if (probe.expect === 'abstain' && bundle.items.length > 0) {
       reasons.push(`expected abstention, got ${bundle.items.length} item(s): ${bundle.items.map((i) => i.id).join(', ')}`);
     }
-    for (const id of probe.must_include ?? []) {
-      if (!bundle.items.some((i) => i.id === id)) reasons.push(`missing required item ${id}`);
+    for (const ref of probe.must_include ?? []) {
+      if (!bundle.items.some((i) => i.id === ref || i.title === ref)) reasons.push(`missing required item ${ref}`);
     }
     for (const entry of probe.must_exclude ?? []) {
       if (violates(entry, bundle.items)) reasons.push(`forbidden item present: ${entry}`);

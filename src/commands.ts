@@ -400,10 +400,13 @@ export function cmdDoctor(root: string): number {
   if (existsSync(probesFile)) {
     try {
       const doc = parseYaml(readFileSync(probesFile, 'utf8')) as { probes?: Probe[] };
-      const allIds = new Set(notes.map((n) => n.id).filter(Boolean));
+      const allRefs = new Set([
+        ...notes.map((n) => n.id).filter(Boolean),
+        ...notes.map((n) => n.title),
+      ]);
       for (const p of doc.probes ?? []) {
-        for (const id of [...(p.must_include ?? []), ...(p.requires ?? [])]) {
-          if (!allIds.has(id)) warn(`probe "${p.q.slice(0, 40)}…" references unknown id ${id}`);
+        for (const ref of [...(p.must_include ?? []), ...(p.requires ?? [])]) {
+          if (!allRefs.has(ref)) warn(`probe "${p.q.slice(0, 40)}…" references unknown id/title ${ref}`);
         }
       }
     } catch {

@@ -57,6 +57,19 @@ describe('runProbes', () => {
     expect(r.skipped).toBe(1);
     expect(r.failed).toHaveLength(0);
   });
+
+  test('must_include and requires match note titles as well as ids (ids change at promotion)', () => {
+    const r = runProbes(db, [
+      {
+        q: 'extend the retry logic call site signatures',
+        requires: ['Guard at the call site'],
+        must_include: ['Guard at the call site'],
+      },
+    ]);
+    expect(r.passed).toBe(1);
+    expect(r.skipped).toBe(0);
+    expect(r.failed).toHaveLength(0);
+  });
 });
 
 describe('quarantineBattery', () => {
