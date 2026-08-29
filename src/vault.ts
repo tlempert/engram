@@ -77,8 +77,17 @@ function fmBlock(fields: Record<string, unknown>): string {
   return `---\n${yamlStringify(clean).trimEnd()}\n---\n`;
 }
 
+/**
+ * Titles double as filenames and wikilink targets, so they must be legal in
+ * Obsidian/macOS and IDENTICAL in both roles. Colon/slash become a spaced
+ * em-dash; Obsidian-illegal characters are dropped.
+ */
 function sanitizeTitle(title: string): string {
-  return title.replace(/[/\\:]+/g, '–').replace(/\s+/g, ' ').trim();
+  return title
+    .replace(/\s*[:/\\|]+\s*/g, ' — ')
+    .replace(/[*?"<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Next free zettel id for the day: 20260830a, 20260830b, … 20260830aa. */

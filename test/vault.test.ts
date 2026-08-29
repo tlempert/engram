@@ -119,6 +119,16 @@ describe('promoteCandidate', () => {
     expect(idA).not.toBe(idB);
   });
 
+  test('colon titles sanitize to a spaced em-dash, keeping filename == title linkable', () => {
+    const colonDraft = CANDIDATE.replace(
+      '# Guard at the call site, not the shared signature',
+      '# Invert: Avoid Stupidity Before Seeking Brilliance',
+    );
+    writeFileSync(join(root, 'inbox/C-20260829-01.md'), colonDraft);
+    const { zettelPath } = promoteCandidate(root, 'inbox/C-20260829-01.md', { now: new Date('2026-08-30') });
+    expect(zettelPath).toBe('zettel/Invert — Avoid Stupidity Before Seeking Brilliance.md');
+  });
+
   test('refuses to overwrite an existing zettel with the same title', () => {
     writeFileSync(join(root, 'inbox/C-20260829-01.md'), CANDIDATE);
     writeFileSync(join(root, 'zettel/Guard at the call site, not the shared signature.md'), '# Existing\n\nX.\n');

@@ -382,11 +382,15 @@ export function cmdDoctor(root: string): number {
       if (n.origin === 'agent-inferred') violation(`${n.path}: agent-inferred origin inside zettel/`);
       if (n.links.length > 7) warn(`${n.path}: ${n.links.length} links (soft cap 7 — is every one load-bearing?)`);
       const relates = n.links.filter((l) => l.relation === 'relates').length;
-      if (n.links.length >= 3 && relates / n.links.length > 0.3) {
+      if (relates >= 2 && relates / n.links.length > 0.5) {
         warn(`${n.path}: ${relates}/${n.links.length} links are untyped "relates" — type the strong ones`);
       }
       for (const l of n.links) {
-        if (!knownTitles.has(l.target)) warn(`${n.path}: link target [[${l.target}]] does not exist yet`);
+        if (/[:|*?"<>\\]/.test(l.target)) {
+          warn(`${n.path}: link target [[${l.target}]] contains characters titles cannot carry (: | * ? " < > \\) — it can never resolve`);
+        } else if (!knownTitles.has(l.target)) {
+          warn(`${n.path}: link target [[${l.target}]] does not exist yet`);
+        }
       }
       const authors = authorsFor(root, n.path).filter((a) => a !== TAL.name);
       if (authors.length > 0) violation(`${n.path}: committed by non-tal author(s): ${authors.join(', ')}`);
