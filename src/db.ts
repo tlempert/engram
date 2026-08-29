@@ -41,7 +41,7 @@ CREATE INDEX links_from ON links(from_path);
 CREATE INDEX notes_title ON notes(title);
 CREATE VIRTUAL TABLE fts USING fts5(
   title, tags, claim, path UNINDEXED, zone UNINDEXED,
-  tokenize = 'unicode61'
+  tokenize = 'porter unicode61'
 );
 `;
 
