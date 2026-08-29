@@ -112,7 +112,9 @@ export function promoteCandidate(root: string, candidatePath: string, opts: Prom
     status: 'active',
     scope: note.scope,
     author: note.author,
-    origin: note.origin ?? 'collaborative',
+    // User acceptance upgrades an agent's inference to a collaborative belief;
+    // user-articulated and collaborative origins pass through unchanged.
+    origin: note.origin === 'agent-inferred' || !note.origin ? 'collaborative' : note.origin,
     created: note.created ?? ymd(now),
     promoted: ymd(now),
     approval: opts.approval ?? 'direct',
@@ -170,6 +172,72 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
 
   mkdirSync(join(root, 'evidence/sessions'), { recursive: true });
   writeFileSync(join(root, rel), `${fm}\n${sections.join('\n')}\n`);
+  return { path: rel, id };
+}
+
+/** Sweep expired inbox candidates into archive/. Returns the paths moved. */
+export function expireCandidates(root: string, now: Date = new Date()): string[] {
+  const today = ymd(now);
+  const moved: string[] = [];
+  for (const note of loadVaultNotes(root)) {
+    if (note.zone !== 'inbox' || !note.expires) continue;
+    if (note.expires >= today) continue;
+    const name = note.path.split('/').pop()!;
+    renameSync(join(root, note.path), join(root, 'archive', `expired-${name}`));
+    moved.push(note.path);
+  }
+  return moved;
+}
+
+/** User quick-capture: a fleeting note in the inbox, origin user-articulated. */
+export function writeFleetingNote(root: string, text: string, now: Date = new Date()): { path: string; id: string } {
+  const stamp = `${ymdCompact(now)}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const { rel, suffix } = uniquePath(root, (s) => `inbox/fleeting/F-${stamp}${s}.md`);
+  const id = `F-${stamp}${suffix}`;
+  const fm = fmBlock({ id, author: 'tal', origin: 'user-articulated', 'source-trust': 'user-said', created: ymd(now) });
+  mkdirSync(join(root, 'inbox/fleeting'), { recursive: true });
+  writeFileSync(join(root, rel), `${fm}\n${text.trim()}\n`);
+  return { path: rel, id };
+}
+
+export interface LinkProposalPayload {
+  from: string;
+  relation: string;
+  to: string;
+  reason?: string;
+  author: string;
+  sessionId?: string;
+}
+
+export interface DisputePayload {
+  target: string;
+  evidence: string;
+  author: string;
+  sessionId?: string;
+}
+
+export function writeLinkProposal(root: string, p: LinkProposalPayload, now: Date = new Date()): { path: string; id: string } {
+  const { rel, suffix } = uniquePath(root, (s) => `inbox/links/L-${ymdCompact(now)}${s}.md`);
+  const id = `L-${ymdCompact(now)}${suffix}`;
+  const fm = fmBlock({
+    id, author: p.author, origin: 'agent-inferred', created: ymd(now),
+    sources: p.sessionId ? [p.sessionId] : [],
+  });
+  mkdirSync(join(root, 'inbox/links'), { recursive: true });
+  const line = `- ${p.relation} [[${p.to}]]${p.reason ? ` — ${p.reason}` : ''}`;
+  writeFileSync(join(root, rel), `${fm}\n# Link proposal for [[${p.from}]]\n\n${line}\n`);
+  return { path: rel, id };
+}
+
+export function writeDisputeProposal(root: string, p: DisputePayload, now: Date = new Date()): { path: string; id: string } {
+  const { rel, suffix } = uniquePath(root, (s) => `inbox/disputes/D-${ymdCompact(now)}${s}.md`);
+  const id = `D-${ymdCompact(now)}${suffix}`;
+  const fm = fmBlock({
+    id, author: p.author, origin: 'agent-inferred', created: ymd(now),
+    sources: p.sessionId ? [p.sessionId] : [],
+  });
+  mkdirSync(join(root, 'inbox/disputes'), { recursive: true });
+  writeFileSync(join(root, rel), `${fm}\n# Dispute: [[${p.target}]]\n\n${p.evidence.trim()}\n`);
   return { path: rel, id };
 }
 

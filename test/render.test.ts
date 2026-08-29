@@ -44,9 +44,9 @@ describe('renderBundle: markdown', () => {
     expect(md).toContain('## Memory (engram · 20/1200 tokens · 2 items)');
   });
 
-  test('each item renders a typed label, id, short origin, and status', () => {
-    expect(md).toContain('**Decision** [d1 · user · active · project:backslash]');
-    expect(md).toContain('**Open question** [q1 · collab · active]');
+  test('each item leads with type and title, then id, short origin, and status', () => {
+    expect(md).toContain('**Decision · Guard at the call site** [d1 · user · active · project:backslash]');
+    expect(md).toContain('**Open question · Do we own backpressure** [q1 · collab · active]');
   });
 
   test('content and why-lines are present', () => {

@@ -20,7 +20,7 @@ function renderItem(item: BundleItem): string {
   const label = TYPE_LABELS[item.type] ?? item.type;
   const origin = ORIGIN_SHORT[item.origin] ?? item.origin;
   const meta = [item.id, origin, item.status, ...(item.scope !== 'global' ? [item.scope] : [])].join(' · ');
-  return `**${label}** [${meta}]\n${item.content}\n↳ why: ${item.why}`;
+  return `**${label} · ${item.title}** [${meta}]\n${item.content}\n↳ why: ${item.why}`;
 }
 
 export function renderBundle(bundle: Bundle, format: 'markdown' | 'json' = 'markdown'): string {

@@ -55,7 +55,15 @@ function scopeAllowed(scope: string, project?: string): boolean {
   return false;
 }
 
-export function compileQuery(db: Database, req: QueryRequest, policy: Policy = DEFAULT_POLICY): Bundle {
+/** The retriever seam: any candidate generator with this shape plugs in (FTS5, qmd, hybrid). */
+export type RetrieverFn = (terms: string[], zones: Zone[], limit: number) => import('./db').FtsHit[];
+
+export function compileQuery(
+  db: Database,
+  req: QueryRequest,
+  policy: Policy = DEFAULT_POLICY,
+  retriever?: RetrieverFn,
+): Bundle {
   const cls = classify(req.task);
   const requested = Math.min(req.tokenBudget ?? cls.defaultBudget, ABSOLUTE_BUDGET_CAP);
   const terms = contentWords(req.task);
@@ -71,7 +79,8 @@ export function compileQuery(db: Database, req: QueryRequest, policy: Policy = D
   if (terms.length === 0) return empty('Task has no searchable content words; proceed from first principles.');
 
   const zones: Zone[] = cls.includeEvidence ? ['zettel', 'maps', 'evidence'] : ['zettel', 'maps'];
-  const hits = searchFts(db, terms, zones, MAX_SEEDS);
+  const search: RetrieverFn = retriever ?? ((t, z, l) => searchFts(db, t, z, l));
+  const hits = search(terms, zones, MAX_SEEDS);
   const maxBm25 = hits.length > 0 ? Math.max(...hits.map((h) => h.score)) : 1;
 
   const scored: Scored[] = [];
@@ -110,7 +119,8 @@ export function compileQuery(db: Database, req: QueryRequest, policy: Policy = D
     if (note.status === 'superseded') whyParts.push('status: superseded (history requested)');
 
     const { content, tokens } = truncate(note.claim, note.id ?? note.path);
-    scored.push({ note, score, matched, titleHit, whyParts, tokenCost: tokens, content });
+    const tokenCost = tokens + Math.ceil(note.title.length / 4); // the rendered title costs tokens too
+    scored.push({ note, score, matched, titleHit, whyParts, tokenCost, content });
   }
 
   if (scored.length === 0) {
@@ -160,4 +170,49 @@ export function compileQuery(db: Database, req: QueryRequest, policy: Policy = D
     budget: { requested, used },
     taskKind: cls.kind,
   };
+}
+
+const EXPANDABLE_ZONES = new Set(['zettel', 'maps', 'evidence']);
+
+/** Progressive disclosure: fetch full content for known ids. Quarantine still holds. */
+export function expandItems(db: Database, ids: string[], budget = 2000): Bundle {
+  const requested = Math.min(budget, ABSOLUTE_BUDGET_CAP);
+  const items: BundleItem[] = [];
+  const insufficiencies: string[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+
+  for (const id of ids) {
+    const row = db.prepare('SELECT path FROM notes WHERE id = ? LIMIT 1').get(id) as { path: string } | null;
+    const note = row ? getNote(db, row.path) : undefined;
+    if (!note) {
+      insufficiencies.push(`no note with id "${id}"`);
+      continue;
+    }
+    if (!EXPANDABLE_ZONES.has(note.zone) || note.origin === 'agent-inferred') {
+      insufficiencies.push(`"${id}" is not expandable (unaccepted or quarantined content)`);
+      continue;
+    }
+    const tokens = note.tokens;
+    if (used + tokens > requested) {
+      omitted.push(`${note.title} (over budget)`);
+      continue;
+    }
+    used += tokens;
+    items.push({
+      id,
+      path: note.path,
+      title: note.title,
+      type: note.type ?? 'insight',
+      origin: note.origin ?? 'unknown',
+      status: note.status,
+      scope: note.scope,
+      content: note.claim,
+      why: 'expanded on request',
+      tokenCost: tokens,
+      score: 1,
+    });
+  }
+
+  return { items, insufficiencies, omitted, budget: { requested, used }, taskKind: 'expand' };
 }

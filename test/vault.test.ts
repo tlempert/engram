@@ -86,6 +86,17 @@ describe('promoteCandidate', () => {
     expect(raw).toContain('promoted: 2026-08-30');
   });
 
+  test('accepting an agent-inferred candidate upgrades its origin to collaborative', () => {
+    const agentDraft = CANDIDATE.replace('origin: user-articulated', 'origin: agent-inferred').replace(
+      '# Guard at the call site, not the shared signature',
+      '# An agent-formulated claim',
+    );
+    writeFileSync(join(root, 'inbox/C-20260829-01.md'), agentDraft);
+    const { zettelPath } = promoteCandidate(root, 'inbox/C-20260829-01.md', { now: new Date('2026-08-30') });
+    const n = parseNote(readFileSync(join(root, zettelPath), 'utf8'), zettelPath);
+    expect(n.origin).toBe('collaborative');
+  });
+
   test('renames Proposed links to Links so they become live', () => {
     writeFileSync(join(root, 'inbox/C-20260829-01.md'), CANDIDATE);
     const { zettelPath } = promoteCandidate(root, 'inbox/C-20260829-01.md', { now: new Date('2026-08-30') });
@@ -147,6 +158,20 @@ describe('writeSessionRecord', () => {
     const a = writeSessionRecord(root, { task: 'a' }, new Date('2026-08-30T14:20:00Z'));
     const b = writeSessionRecord(root, { task: 'b' }, new Date('2026-08-30T14:20:00Z'));
     expect(a.id).not.toBe(b.id);
+  });
+});
+
+describe('expireCandidates', () => {
+  test('moves candidates past their expiry into archive, leaves fresh ones', async () => {
+    const { expireCandidates } = await import('../src/vault');
+    writeFileSync(join(root, 'inbox/C-1.md'), CANDIDATE); // expires 2026-09-28
+    const fresh = CANDIDATE.replace('expires: 2026-09-28', 'expires: 2026-12-01').replace('C-20260829-01', 'C-2');
+    writeFileSync(join(root, 'inbox/C-2.md'), fresh);
+    const expired = expireCandidates(root, new Date('2026-10-01'));
+    expect(expired).toHaveLength(1);
+    expect(existsSync(join(root, 'inbox/C-1.md'))).toBe(false);
+    expect(existsSync(join(root, 'inbox/C-2.md'))).toBe(true);
+    expect(existsSync(join(root, 'archive/expired-C-1.md'))).toBe(true);
   });
 });
 
