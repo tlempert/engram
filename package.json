@@ -1,17 +1,14 @@
 {
   "name": "engram",
-  "module": "index.ts",
+  "version": "0.1.0",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
+  "bin": { "engram": "./src/cli.ts" },
+  "scripts": { "test": "bun test" },
+  "devDependencies": { "@types/bun": "latest" },
+  "peerDependencies": { "typescript": "^5" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "yaml": "^2.9.0",
-    "zod": "^4.5.2"
+    "yaml": "^2.9.0"
   }
 }

@@ -168,4 +168,8 @@ export async function serveMcp(root: string): Promise<void> {
   });
 
   await server.connect(new StdioServerTransport());
+  // connect() resolves at startup; hold the process open until the client closes stdio.
+  await new Promise<void>((resolve) => {
+    server.onclose = resolve;
+  });
 }
