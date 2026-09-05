@@ -27,6 +27,9 @@ describe('engram end-to-end', () => {
       expect(existsSync(join(root, p))).toBe(true);
     }
     expect(existsSync(join(root, '.git'))).toBe(true);
+    // Pin the retriever: qmd collections are machine-global, so a temp vault would
+    // otherwise pick up whatever engram-* collections the developer has registered.
+    writeFileSync(join(root, '_system/config.yaml'), 'retriever: fts5\n');
   });
 
   test('query on an empty vault abstains explicitly', () => {

@@ -3,6 +3,8 @@ import { buildIndex } from '../src/db';
 import { parseNote } from '../src/parse';
 import { quarantineBattery, runProbes } from '../src/evalrun';
 import type { Probe } from '../src/evalrun';
+import { DEFAULT_POLICY } from '../src/compile';
+import type { RetrieverFn } from '../src/compile';
 
 const db = buildIndex([
   parseNote(
@@ -74,7 +76,53 @@ describe('runProbes', () => {
 
 describe('quarantineBattery', () => {
   test('querying inbox candidates by their own titles must return nothing from the inbox', () => {
-    const violations = quarantineBattery(db);
-    expect(violations).toHaveLength(0);
+    const r = quarantineBattery(db);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  test('reports how many candidates it actually sampled, so an empty inbox cannot pass as "clean"', () => {
+    expect(quarantineBattery(db).sampled).toBe(1);
+  });
+
+  test('queries through the supplied retriever, once per sampled candidate', () => {
+    // The compiler hard-filters inbox/ regardless of retriever, so a leak can't be
+    // staged here; what must hold is that the battery exercises production's seam.
+    let calls = 0;
+    const counting: RetrieverFn = () => {
+      calls++;
+      return [];
+    };
+    const r = quarantineBattery(db, { retriever: counting });
+    expect(calls).toBe(r.sampled);
+    expect(r.sampled).toBe(1);
+  });
+});
+
+/**
+ * Regression: eval must exercise the retriever and policy production uses.
+ *
+ * runProbes used to call compileQuery with neither, silently falling back to
+ * bare FTS5 and DEFAULT_POLICY. With a qmd collection registered, production
+ * ran a different retriever entirely — the probes passed 10/10 while it
+ * returned garbage, because they never called it.
+ */
+describe('runProbes honours the production seams', () => {
+  const probe: Probe = { q: 'extend the retry logic call site signatures', must_include: ['d1'] };
+
+  test('a probe fails when the supplied retriever withholds a note FTS5 would have found', () => {
+    const silent: RetrieverFn = () => [];
+    const r = runProbes(db, [probe], { retriever: silent });
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]?.reason).toContain('d1');
+  });
+
+  test('resolves policy per probe through the agent the probe names', () => {
+    const asked: (string | undefined)[] = [];
+    const policyFor = (agent?: string) => {
+      asked.push(agent);
+      return DEFAULT_POLICY;
+    };
+    runProbes(db, [{ ...probe, agent: 'reviewer' }, probe], { policyFor });
+    expect(asked).toEqual(['reviewer', undefined]);
   });
 });

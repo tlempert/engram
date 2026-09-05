@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
-import { compileQuery } from './compile';
+import { compileQuery, DEFAULT_POLICY } from './compile';
+import type { Policy, RetrieverFn } from './compile';
 import { listNotes } from './db';
 import type { BundleItem } from './types';
 
@@ -19,6 +20,16 @@ export interface ProbeResult {
   skipped: number;
 }
 
+/**
+ * The seams production compiles through. Eval must run the same retriever and
+ * the same per-agent policy as `engram query`, or it is measuring a different
+ * system than the one answering real queries.
+ */
+export interface EvalSeams {
+  retriever?: RetrieverFn;
+  policyFor?: (agent?: string) => Policy;
+}
+
 /** Probes may reference notes by id or by title — titles survive promotion, ids do not. */
 function idExistsInZettel(db: Database, ref: string): boolean {
   const row = db.prepare("SELECT 1 FROM notes WHERE (id = ? OR title = ?) AND zone = 'zettel' LIMIT 1").get(ref, ref);
@@ -35,7 +46,7 @@ function violates(entry: string, items: BundleItem[]): boolean {
   return items.some((i) => i.id === entry || i.title === entry);
 }
 
-export function runProbes(db: Database, probes: Probe[]): ProbeResult {
+export function runProbes(db: Database, probes: Probe[], seams: EvalSeams = {}): ProbeResult {
   let passed = 0;
   let skipped = 0;
   const failed: { q: string; reason: string }[] = [];
@@ -47,7 +58,12 @@ export function runProbes(db: Database, probes: Probe[]): ProbeResult {
       continue; // awaiting promotion — not a failure
     }
 
-    const bundle = compileQuery(db, { task: probe.q, project: probe.project });
+    const bundle = compileQuery(
+      db,
+      { task: probe.q, agent: probe.agent, project: probe.project },
+      seams.policyFor?.(probe.agent) ?? DEFAULT_POLICY,
+      seams.retriever,
+    );
     const reasons: string[] = [];
 
     if (probe.expect === 'abstain' && bundle.items.length > 0) {
@@ -67,17 +83,24 @@ export function runProbes(db: Database, probes: Probe[]): ProbeResult {
   return { passed, failed, skipped };
 }
 
+export interface QuarantineResult {
+  /** How many candidates were actually queried — zero means nothing was proven. */
+  sampled: number;
+  violations: string[];
+}
+
 /** For each inbox candidate, query its own title; any inbox item surfacing is a violation. */
-export function quarantineBattery(db: Database, sample = 5): string[] {
+export function quarantineBattery(db: Database, seams: EvalSeams = {}, sample = 5): QuarantineResult {
+  const policy = seams.policyFor?.() ?? DEFAULT_POLICY;
   const violations: string[] = [];
   const candidates = listNotes(db, 'inbox').slice(0, sample);
   for (const c of candidates) {
-    const bundle = compileQuery(db, { task: c.title });
+    const bundle = compileQuery(db, { task: c.title }, policy, seams.retriever);
     for (const item of bundle.items) {
       if (item.path.startsWith('inbox/')) {
         violations.push(`inbox item "${item.title}" surfaced for query "${c.title}"`);
       }
     }
   }
-  return violations;
+  return { sampled: candidates.length, violations };
 }

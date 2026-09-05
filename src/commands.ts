@@ -432,12 +432,17 @@ export function cmdEval(root: string): number {
     const doc = parseYaml(readFileSync(probesFile, 'utf8')) as { probes?: Probe[] };
     probes = doc.probes ?? [];
   }
-  const r = runProbes(db, probes);
+  const { fn, engine } = chooseRetriever(db, root);
+  const seams = { retriever: fn, policyFor: (agent?: string) => loadPolicy(root, agent) };
+  console.log(`retriever: ${engine}`);
+
+  const r = runProbes(db, probes, seams);
   console.log(`probes: ${r.passed} passed, ${r.failed.length} failed, ${r.skipped} skipped (awaiting promotion)`);
   for (const f of r.failed) console.log(`FAIL: "${f.q}" — ${f.reason}`);
 
-  const violations = quarantineBattery(db);
-  if (violations.length === 0) console.log('quarantine battery: clean (inbox content never surfaces)');
+  const { sampled, violations } = quarantineBattery(db, seams);
+  if (sampled === 0) console.log('quarantine battery: 0 candidates sampled — inbox empty, nothing proven');
+  else if (violations.length === 0) console.log(`quarantine battery: clean (${sampled} candidate(s), inbox content never surfaced)`);
   for (const v of violations) console.log(`FAIL quarantine violation: ${v}`);
 
   const inboxAgentInZettel = listNotes(db, 'zettel').filter((n) => n.origin === 'agent-inferred');
