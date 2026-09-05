@@ -4,10 +4,10 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { compileQuery, expandItems } from './compile';
-import { buildIndex, searchFts } from './db';
+import { buildIndex, getNoteByTitle, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
 import { agentAuthor, commitAll } from './git';
-import { qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch, rrfMerge } from './qmd';
+import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { loadVaultNotes, writeCandidate, writeDisputeProposal, writeLinkProposal, writeSessionRecord } from './vault';
 import type { RetrieverFn } from './compile';
@@ -116,8 +116,8 @@ export async function serveMcp(root: string): Promise<void> {
           if (config.retriever !== 'fts5' && qmdBinaryAvailable() && qmdCollectionsRegistered()) {
             retriever = (t, z, l) => {
               const fts = searchFts(db, t, z, l);
-              const qmd = qmdSearch(t, z, l);
-              return qmd ? rrfMerge(fts, qmd).slice(0, l) : fts;
+              const qmd = qmdSearch(t, z, l, (title) => getNoteByTitle(db, title)?.path ?? null);
+              return fuseRetrievers(fts, qmd).slice(0, l);
             };
           }
           const request: QueryRequest = {

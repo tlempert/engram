@@ -4,10 +4,10 @@ import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { compileQuery, expandItems } from './compile';
 import type { RetrieverFn } from './compile';
-import { buildIndex, listNotes, searchFts } from './db';
+import { buildIndex, getNoteByTitle, listNotes, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
 import { agentAuthor, authorsFor, commitAll, gitInit, TAL } from './git';
-import { qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch, rrfMerge } from './qmd';
+import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { runProbes, quarantineBattery } from './evalrun';
 import type { Probe } from './evalrun';
@@ -116,8 +116,8 @@ function chooseRetriever(db: Database, root: string): { fn: RetrieverFn | undefi
   if (wantQmd && qmdBinaryAvailable() && qmdCollectionsRegistered()) {
     const fn: RetrieverFn = (terms, zones, limit) => {
       const fts = searchFts(db, terms, zones, limit);
-      const qmd = qmdSearch(terms, zones, limit);
-      return qmd ? rrfMerge(fts, qmd).slice(0, limit) : fts;
+      const qmd = qmdSearch(terms, zones, limit, (t) => getNoteByTitle(db, t)?.path ?? null);
+      return fuseRetrievers(fts, qmd).slice(0, limit);
     };
     return { fn, engine: 'qmd+fts5 (rrf)' };
   }
