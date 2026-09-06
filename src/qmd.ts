@@ -32,10 +32,11 @@ export function rrfMerge(a: FtsHit[], b: FtsHit[], k = 60): FtsHit[] {
  */
 export const QMD_TIMEOUT_MS = 4000;
 
-function qmd(args: string[]): ReturnType<typeof Bun.spawnSync> {
+function qmd(args: string[]): { exitCode: number | null; stdout: string } {
   // env passed explicitly: Bun otherwise resolves the binary against the PATH
   // captured at startup, not the current one.
-  return Bun.spawnSync(['qmd', ...args], { timeout: QMD_TIMEOUT_MS, env: process.env });
+  const proc = Bun.spawnSync(['qmd', ...args], { timeout: QMD_TIMEOUT_MS, env: process.env });
+  return { exitCode: proc.exitCode, stdout: proc.stdout?.toString() ?? '' };
 }
 
 export function qmdBinaryAvailable(): boolean {
@@ -51,7 +52,7 @@ export function qmdCollectionsRegistered(): boolean {
   try {
     const proc = qmd(['collection', 'list']);
     if (proc.exitCode !== 0) return false;
-    return proc.stdout.toString().includes('engram-');
+    return proc.stdout.includes('engram-');
   } catch {
     return false;
   }
@@ -75,7 +76,7 @@ export function qmdSearch(
   try {
     const proc = qmd(['vsearch', terms.join(' '), '--json', '-n', '50']);
     if (proc.exitCode !== 0) return null;
-    return qmdRows(JSON.parse(proc.stdout.toString()) as QmdRow[], resolvePath, zones, limit);
+    return qmdRows(JSON.parse(proc.stdout) as QmdRow[], resolvePath, zones, limit);
   } catch {
     return null;
   }

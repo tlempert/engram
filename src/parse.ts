@@ -132,6 +132,8 @@ export function parseNote(raw: string, path: string): ParsedNote {
     expires: fm['expires'] != null ? String(fm['expires']) : undefined,
     sourceTrust: fm['source-trust'] != null ? String(fm['source-trust']) : undefined,
     confidence: fm['confidence'] != null ? String(fm['confidence']) : undefined,
+    externalId: fm['external-id'] != null ? String(fm['external-id']) : undefined,
+    fingerprint: fm['fingerprint'] != null ? String(fm['fingerprint']) : undefined,
     sources: asStringArray(fm['sources']),
     tags: asStringArray(fm['tags']),
     supersedes: unwrapWikilinks(asStringArray(fm['supersedes'])),

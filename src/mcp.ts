@@ -56,6 +56,10 @@ const WRITE_TOOLS = [
       properties: {
         task: { type: 'string' },
         author: { type: 'string', description: 'Recording agent name' },
+        externalId: {
+          type: 'string',
+          description: 'Idempotency key (e.g. swarmforge:<project>:<task-id>). A retry with the same key and content returns the existing record; a reused key with different content is refused.',
+        },
         client: { type: 'string' },
         agents: { type: 'array', items: { type: 'string' } },
         project: { type: 'string' },
@@ -164,12 +168,12 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
         }
         case 'memory_record': {
           const author = String(args['author'] ?? 'agent');
-          const { id, path } = withVaultLock(root, () => {
+          const { id, path, existed } = withVaultLock(root, () => {
             const written = writeSessionRecord(root, args as never);
-            commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
+            if (!written.existed) commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
             return written;
           });
-          return text(`recorded ${id} at ${path}`);
+          return text(existed ? `already recorded ${id} at ${path} (externalId ${String(args['externalId'])})` : `recorded ${id} at ${path}`);
         }
         case 'memory_propose': {
           const author = String(args['author'] ?? 'agent');

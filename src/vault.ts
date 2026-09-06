@@ -14,6 +14,8 @@ export interface PromoteOptions {
 
 export interface SessionPayload {
   task: string;
+  /** Idempotency key. A retry with the same key and content returns the existing record. */
+  externalId?: string;
   client?: string;
   agents?: string[];
   project?: string;
@@ -153,7 +155,29 @@ function uniquePath(root: string, makeRel: (suffix: string) => string): { rel: s
   throw new Error('could not find a unique path');
 }
 
-export function writeSessionRecord(root: string, payload: SessionPayload, now: Date = new Date()): { path: string; id: string } {
+/** Stable content hash of a record payload: same fields in any key order → same fingerprint. */
+function fingerprintOf(payload: SessionPayload): string {
+  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  return new Bun.CryptoHasher('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
+export interface WrittenRecord {
+  path: string;
+  id: string;
+  /** True when an identical record with this externalId already existed; nothing was written. */
+  existed: boolean;
+}
+
+export function writeSessionRecord(root: string, payload: SessionPayload, now: Date = new Date()): WrittenRecord {
+  const fingerprint = payload.externalId ? fingerprintOf(payload) : undefined;
+  if (payload.externalId) {
+    const existing = loadVaultNotes(root).find((n) => n.zone === 'evidence' && n.externalId === payload.externalId);
+    if (existing) {
+      if (existing.fingerprint === fingerprint) return { path: existing.path, id: existing.id ?? existing.path, existed: true };
+      throw new Error(`externalId "${payload.externalId}" is already recorded as ${existing.id} with different content`);
+    }
+  }
+
   const stamp = `${ymdCompact(now)}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   const { rel, suffix } = uniquePath(root, (s) => `evidence/sessions/S-${stamp}${s}.md`);
   const id = `S-${stamp}${suffix}`;
@@ -161,6 +185,8 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
   const fm = fmBlock({
     id,
     type: 'session',
+    'external-id': payload.externalId,
+    fingerprint,
     client: payload.client,
     agents: payload.agents,
     project: payload.project,
@@ -186,7 +212,7 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
 
   mkdirSync(join(root, 'evidence/sessions'), { recursive: true });
   writeFileSync(join(root, rel), `${fm}\n${sections.join('\n')}\n`);
-  return { path: rel, id };
+  return { path: rel, id, existed: false };
 }
 
 export interface Move {

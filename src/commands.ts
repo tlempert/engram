@@ -205,12 +205,12 @@ export function cmdNote(root: string, text: string): number {
 
 export function cmdRecord(root: string, payload: SessionPayload & { author?: string }): number {
   const author = payload.author ?? 'agent';
-  const { path, id } = withVaultLock(root, () => {
+  const { path, id, existed } = withVaultLock(root, () => {
     const written = writeSessionRecord(root, payload);
-    commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
+    if (!written.existed) commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
     return written;
   });
-  console.log(`recorded ${id} at ${path}`);
+  console.log(existed ? `already recorded ${id} at ${path} (externalId ${payload.externalId})` : `recorded ${id} at ${path}`);
   return 0;
 }
 

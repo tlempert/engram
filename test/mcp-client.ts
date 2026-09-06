@@ -13,7 +13,7 @@ export class McpClient {
       stdin: 'pipe',
       stdout: 'pipe',
     });
-    this.reader = this.proc.stdout.getReader();
+    this.reader = (this.proc.stdout as ReadableStream<Uint8Array>).getReader();
   }
 
   async initialize(): Promise<void> {
