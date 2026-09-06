@@ -25,9 +25,22 @@ export function rrfMerge(a: FtsHit[], b: FtsHit[], k = 60): FtsHit[] {
     .sort((x, y) => y.score - x.score);
 }
 
+/**
+ * Deadline for any qmd subprocess. vsearch loads an embedding model and has been
+ * observed never returning; a stalled arm must read as a failed arm so the
+ * caller falls back to FTS5 instead of hanging every memory_query.
+ */
+export const QMD_TIMEOUT_MS = 4000;
+
+function qmd(args: string[]): ReturnType<typeof Bun.spawnSync> {
+  // env passed explicitly: Bun otherwise resolves the binary against the PATH
+  // captured at startup, not the current one.
+  return Bun.spawnSync(['qmd', ...args], { timeout: QMD_TIMEOUT_MS, env: process.env });
+}
+
 export function qmdBinaryAvailable(): boolean {
   try {
-    return Bun.spawnSync(['qmd', '--version']).exitCode === 0;
+    return qmd(['--version']).exitCode === 0;
   } catch {
     return false;
   }
@@ -36,7 +49,7 @@ export function qmdBinaryAvailable(): boolean {
 /** True when the user has registered engram-* collections with qmd. */
 export function qmdCollectionsRegistered(): boolean {
   try {
-    const proc = Bun.spawnSync(['qmd', 'collection', 'list']);
+    const proc = qmd(['collection', 'list']);
     if (proc.exitCode !== 0) return false;
     return proc.stdout.toString().includes('engram-');
   } catch {
@@ -60,7 +73,7 @@ export function qmdSearch(
   resolvePath: (title: string) => string | null,
 ): FtsHit[] | null {
   try {
-    const proc = Bun.spawnSync(['qmd', 'vsearch', terms.join(' '), '--json', '-n', '50']);
+    const proc = qmd(['vsearch', terms.join(' '), '--json', '-n', '50']);
     if (proc.exitCode !== 0) return null;
     return qmdRows(JSON.parse(proc.stdout.toString()) as QmdRow[], resolvePath, zones, limit);
   } catch {
