@@ -13,15 +13,18 @@ const CLI = join(import.meta.dir, '../src/cli.ts');
 const LOCK = '.index/write.lock';
 let root: string;
 
-function spawnEngram(...args: string[]) {
+type Child = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+
+function spawnEngram(...args: string[]): Child {
   return Bun.spawn(['bun', CLI, ...args], {
     env: { ...process.env, ENGRAM_VAULT: root },
+    stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
 }
 
-async function finish(proc: ReturnType<typeof Bun.spawn>): Promise<{ code: number; out: string }> {
+async function finish(proc: Child): Promise<{ code: number; out: string }> {
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   return { code, out: out + err };
 }

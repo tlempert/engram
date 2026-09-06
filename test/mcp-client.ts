@@ -2,8 +2,8 @@ import { join } from 'path';
 
 /** Minimal newline-delimited JSON-RPC client for driving `engram serve` in tests. */
 export class McpClient {
-  private proc: ReturnType<typeof Bun.spawn>;
-  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private proc: Bun.Subprocess<'pipe', 'pipe', 'inherit'>;
+  private reader: { read(): Promise<{ value?: Uint8Array; done: boolean }> };
   private buffer = '';
   private nextId = 1;
 
@@ -12,8 +12,9 @@ export class McpClient {
       env: { ...process.env, ENGRAM_VAULT: root },
       stdin: 'pipe',
       stdout: 'pipe',
+      stderr: 'inherit',
     });
-    this.reader = (this.proc.stdout as ReadableStream<Uint8Array>).getReader();
+    this.reader = this.proc.stdout.getReader();
   }
 
   async initialize(): Promise<void> {
