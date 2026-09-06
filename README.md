@@ -47,7 +47,9 @@ cp -r skill ~/.claude/skills/engram
 
 Any other MCP client (Codex, OpenCode, …) points at the same command:
 `~/.bun/bin/engram serve` over stdio, tools `memory_query`, `memory_expand`,
-`memory_record`, `memory_propose`.
+`memory_record`, `memory_propose`. Unattended agents (swarm workers) get
+`engram serve --read-only`, which exposes only the two read tools and writes
+nothing into the vault.
 
 Optional:
 

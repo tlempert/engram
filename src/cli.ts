@@ -23,7 +23,8 @@ usage:
   engram stats                       zone/type/authorship counts
   engram doctor                      health & integrity checks
   engram eval                        run gold probes + quarantine battery
-  engram serve                       MCP server on stdio (memory_query/expand/record/propose)
+  engram serve [--read-only]         MCP server on stdio (memory_query/expand/record/propose)
+      --read-only                    expose only memory_query and memory_expand (swarm workers)
 `;
 
 function parseFlags(args: string[]): { positional: string[]; flags: Map<string, string | boolean> } {
@@ -98,7 +99,7 @@ async function main(): Promise<number> {
     case 'eval':
       return cmdEval(root);
     case 'serve':
-      await serveMcp(root);
+      await serveMcp(root, { readOnly: flags.has('read-only') });
       return 0;
     default:
       console.log(HELP);
