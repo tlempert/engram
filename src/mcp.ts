@@ -7,6 +7,7 @@ import { compileQuery, expandItems } from './compile';
 import { buildIndex, getNoteByTitle, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
 import { agentAuthor, commitPaths } from './git';
+import { withVaultLock } from './lock';
 import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { loadVaultNotes, writeCandidate, writeDisputeProposal, writeLinkProposal, writeSessionRecord } from './vault';
@@ -163,19 +164,27 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
         }
         case 'memory_record': {
           const author = String(args['author'] ?? 'agent');
-          const { id, path } = writeSessionRecord(root, args as never);
-          commitPaths(root, [path], `engram(${author}): record session ${id}`, agentAuthor(author));
+          const { id, path } = withVaultLock(root, () => {
+            const written = writeSessionRecord(root, args as never);
+            commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
+            return written;
+          });
           return text(`recorded ${id} at ${path}`);
         }
         case 'memory_propose': {
           const author = String(args['author'] ?? 'agent');
           const kind = String(args['kind']);
-          let result: { id: string; path: string };
-          if (kind === 'candidate') result = writeCandidate(root, args as never);
-          else if (kind === 'link') result = writeLinkProposal(root, args as never);
-          else if (kind === 'dispute') result = writeDisputeProposal(root, args as never);
-          else return failure(`unknown proposal kind: ${kind}`);
-          commitPaths(root, [result.path], `engram(${author}): propose ${kind} ${result.id}`, agentAuthor(author));
+          const write =
+            kind === 'candidate' ? () => writeCandidate(root, args as never)
+            : kind === 'link' ? () => writeLinkProposal(root, args as never)
+            : kind === 'dispute' ? () => writeDisputeProposal(root, args as never)
+            : null;
+          if (!write) return failure(`unknown proposal kind: ${kind}`);
+          const result = withVaultLock(root, () => {
+            const written = write();
+            commitPaths(root, [written.path], `engram(${author}): propose ${kind} ${written.id}`, agentAuthor(author));
+            return written;
+          });
           return text(`proposed ${result.id} (pending user review — it will not affect retrieval until promoted)`);
         }
         default:
