@@ -104,7 +104,11 @@ function newZettelId(root: string, now: Date): string {
   throw new Error(`no free zettel id for ${prefix}`);
 }
 
-export function promoteCandidate(root: string, candidatePath: string, opts: PromoteOptions = {}): { zettelPath: string } {
+export function promoteCandidate(
+  root: string,
+  candidatePath: string,
+  opts: PromoteOptions = {},
+): { zettelPath: string; archivePath: string } {
   const now = opts.now ?? new Date();
   const abs = join(root, candidatePath);
   const note = parseNote(readFileSync(abs, 'utf8'), candidatePath);
@@ -134,9 +138,10 @@ export function promoteCandidate(root: string, candidatePath: string, opts: Prom
 
   const body = note.body.replace(/^##\s+Proposed links\s*$/im, '## Links');
   writeFileSync(zettelAbs, `${fm}\n${body.trimStart()}`);
-  renameSync(abs, join(root, 'archive', `promoted-${candidatePath.split('/').pop()}`));
   // The inbox copy is archived, not deleted — audit trail stays cheap.
-  return { zettelPath };
+  const archivePath = `archive/promoted-${candidatePath.split('/').pop()}`;
+  renameSync(abs, join(root, archivePath));
+  return { zettelPath, archivePath };
 }
 
 function uniquePath(root: string, makeRel: (suffix: string) => string): { rel: string; suffix: string } {
@@ -184,16 +189,21 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
   return { path: rel, id };
 }
 
-/** Sweep expired inbox candidates into archive/. Returns the paths moved. */
-export function expireCandidates(root: string, now: Date = new Date()): string[] {
+export interface Move {
+  from: string;
+  to: string;
+}
+
+/** Sweep expired inbox candidates into archive/. Returns each move made. */
+export function expireCandidates(root: string, now: Date = new Date()): Move[] {
   const today = ymd(now);
-  const moved: string[] = [];
+  const moved: Move[] = [];
   for (const note of loadVaultNotes(root)) {
     if (note.zone !== 'inbox' || !note.expires) continue;
     if (note.expires >= today) continue;
-    const name = note.path.split('/').pop()!;
-    renameSync(join(root, note.path), join(root, 'archive', `expired-${name}`));
-    moved.push(note.path);
+    const to = `archive/expired-${note.path.split('/').pop()!}`;
+    renameSync(join(root, note.path), join(root, to));
+    moved.push({ from: note.path, to });
   }
   return moved;
 }

@@ -6,7 +6,7 @@ import { join } from 'path';
 import { compileQuery, expandItems } from './compile';
 import { buildIndex, getNoteByTitle, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
-import { agentAuthor, commitAll } from './git';
+import { agentAuthor, commitPaths } from './git';
 import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { loadVaultNotes, writeCandidate, writeDisputeProposal, writeLinkProposal, writeSessionRecord } from './vault';
@@ -164,7 +164,7 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
         case 'memory_record': {
           const author = String(args['author'] ?? 'agent');
           const { id, path } = writeSessionRecord(root, args as never);
-          commitAll(root, `engram(${author}): record session ${id}`, agentAuthor(author));
+          commitPaths(root, [path], `engram(${author}): record session ${id}`, agentAuthor(author));
           return text(`recorded ${id} at ${path}`);
         }
         case 'memory_propose': {
@@ -175,7 +175,7 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
           else if (kind === 'link') result = writeLinkProposal(root, args as never);
           else if (kind === 'dispute') result = writeDisputeProposal(root, args as never);
           else return failure(`unknown proposal kind: ${kind}`);
-          commitAll(root, `engram(${author}): propose ${kind} ${result.id}`, agentAuthor(author));
+          commitPaths(root, [result.path], `engram(${author}): propose ${kind} ${result.id}`, agentAuthor(author));
           return text(`proposed ${result.id} (pending user review — it will not affect retrieval until promoted)`);
         }
         default:
