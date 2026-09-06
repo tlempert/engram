@@ -125,13 +125,17 @@ export function parseNote(raw: string, path: string): ParsedNote {
     id: fm['id'] != null ? String(fm['id']) : undefined,
     type,
     status,
-    scope: fm['scope'] != null ? String(fm['scope']) : 'global',
+    // Session records written before scope was stored carry only `project`;
+    // derive their scope so the project firewall covers old evidence too.
+    scope: fm['scope'] != null ? String(fm['scope']) : fm['project'] != null ? `project:${String(fm['project'])}` : 'global',
     author: fm['author'] != null ? String(fm['author']) : undefined,
     origin: fm['origin'] != null ? String(fm['origin']) : undefined,
     created: fm['created'] != null ? String(fm['created']) : undefined,
     expires: fm['expires'] != null ? String(fm['expires']) : undefined,
     sourceTrust: fm['source-trust'] != null ? String(fm['source-trust']) : undefined,
     confidence: fm['confidence'] != null ? String(fm['confidence']) : undefined,
+    externalId: fm['external-id'] != null ? String(fm['external-id']) : undefined,
+    fingerprint: fm['fingerprint'] != null ? String(fm['fingerprint']) : undefined,
     sources: asStringArray(fm['sources']),
     tags: asStringArray(fm['tags']),
     supersedes: unwrapWikilinks(asStringArray(fm['supersedes'])),

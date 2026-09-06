@@ -14,6 +14,8 @@ export interface PromoteOptions {
 
 export interface SessionPayload {
   task: string;
+  /** Idempotency key. A retry with the same key and content returns the existing record. */
+  externalId?: string;
   client?: string;
   agents?: string[];
   project?: string;
@@ -49,21 +51,46 @@ function ymdCompact(d: Date): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
+/** A path that was listed but is gone by the time we touch it: a concurrent move, not an error. */
+function vanished(e: unknown): boolean {
+  return (e as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
 function walk(dir: string, rel: string, out: { rel: string; abs: string }[]): void {
   if (!existsSync(dir)) return;
   for (const entry of readdirSync(dir)) {
     if (entry.startsWith('.') || entry.startsWith('_')) continue;
     const abs = join(dir, entry);
     const relPath = rel ? `${rel}/${entry}` : entry;
-    if (statSync(abs).isDirectory()) walk(abs, relPath, out);
+    let isDir: boolean;
+    try {
+      isDir = statSync(abs).isDirectory();
+    } catch (e) {
+      if (vanished(e)) continue;
+      throw e;
+    }
+    if (isDir) walk(abs, relPath, out);
     else if (entry.toLowerCase().endsWith('.md')) out.push({ rel: relPath, abs });
   }
 }
 
+/**
+ * Reads take no lock; promotion, rejection, and expiry rename files under a
+ * running scan. Whatever vanishes mid-scan is skipped — the next query sees
+ * the settled state — instead of failing the whole read.
+ */
 export function loadVaultNotes(root: string): ParsedNote[] {
   const files: { rel: string; abs: string }[] = [];
   for (const zone of CONTENT_ZONES) walk(join(root, zone), zone, files);
-  return files.map((f) => parseNote(readFileSync(f.abs, 'utf8'), f.rel));
+  const notes: ParsedNote[] = [];
+  for (const f of files) {
+    try {
+      notes.push(parseNote(readFileSync(f.abs, 'utf8'), f.rel));
+    } catch (e) {
+      if (!vanished(e)) throw e;
+    }
+  }
+  return notes;
 }
 
 /** Frontmatter serialized with stable key order; undefined values dropped. */
@@ -104,7 +131,11 @@ function newZettelId(root: string, now: Date): string {
   throw new Error(`no free zettel id for ${prefix}`);
 }
 
-export function promoteCandidate(root: string, candidatePath: string, opts: PromoteOptions = {}): { zettelPath: string } {
+export function promoteCandidate(
+  root: string,
+  candidatePath: string,
+  opts: PromoteOptions = {},
+): { zettelPath: string; archivePath: string } {
   const now = opts.now ?? new Date();
   const abs = join(root, candidatePath);
   const note = parseNote(readFileSync(abs, 'utf8'), candidatePath);
@@ -134,9 +165,10 @@ export function promoteCandidate(root: string, candidatePath: string, opts: Prom
 
   const body = note.body.replace(/^##\s+Proposed links\s*$/im, '## Links');
   writeFileSync(zettelAbs, `${fm}\n${body.trimStart()}`);
-  renameSync(abs, join(root, 'archive', `promoted-${candidatePath.split('/').pop()}`));
   // The inbox copy is archived, not deleted — audit trail stays cheap.
-  return { zettelPath };
+  const archivePath = `archive/promoted-${candidatePath.split('/').pop()}`;
+  renameSync(abs, join(root, archivePath));
+  return { zettelPath, archivePath };
 }
 
 function uniquePath(root: string, makeRel: (suffix: string) => string): { rel: string; suffix: string } {
@@ -148,7 +180,29 @@ function uniquePath(root: string, makeRel: (suffix: string) => string): { rel: s
   throw new Error('could not find a unique path');
 }
 
-export function writeSessionRecord(root: string, payload: SessionPayload, now: Date = new Date()): { path: string; id: string } {
+/** Stable content hash of a record payload: same fields in any key order → same fingerprint. */
+function fingerprintOf(payload: SessionPayload): string {
+  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  return new Bun.CryptoHasher('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
+export interface WrittenRecord {
+  path: string;
+  id: string;
+  /** True when an identical record with this externalId already existed; nothing was written. */
+  existed: boolean;
+}
+
+export function writeSessionRecord(root: string, payload: SessionPayload, now: Date = new Date()): WrittenRecord {
+  const fingerprint = payload.externalId ? fingerprintOf(payload) : undefined;
+  if (payload.externalId) {
+    const existing = loadVaultNotes(root).find((n) => n.zone === 'evidence' && n.externalId === payload.externalId);
+    if (existing) {
+      if (existing.fingerprint === fingerprint) return { path: existing.path, id: existing.id ?? existing.path, existed: true };
+      throw new Error(`externalId "${payload.externalId}" is already recorded as ${existing.id} with different content`);
+    }
+  }
+
   const stamp = `${ymdCompact(now)}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   const { rel, suffix } = uniquePath(root, (s) => `evidence/sessions/S-${stamp}${s}.md`);
   const id = `S-${stamp}${suffix}`;
@@ -156,9 +210,12 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
   const fm = fmBlock({
     id,
     type: 'session',
+    'external-id': payload.externalId,
+    fingerprint,
     client: payload.client,
     agents: payload.agents,
     project: payload.project,
+    scope: payload.project ? `project:${payload.project}` : 'global',
     outcome: payload.outcome,
     created: ymd(now),
     transcript: payload.transcript,
@@ -181,19 +238,24 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
 
   mkdirSync(join(root, 'evidence/sessions'), { recursive: true });
   writeFileSync(join(root, rel), `${fm}\n${sections.join('\n')}\n`);
-  return { path: rel, id };
+  return { path: rel, id, existed: false };
 }
 
-/** Sweep expired inbox candidates into archive/. Returns the paths moved. */
-export function expireCandidates(root: string, now: Date = new Date()): string[] {
+export interface Move {
+  from: string;
+  to: string;
+}
+
+/** Sweep expired inbox candidates into archive/. Returns each move made. */
+export function expireCandidates(root: string, now: Date = new Date()): Move[] {
   const today = ymd(now);
-  const moved: string[] = [];
+  const moved: Move[] = [];
   for (const note of loadVaultNotes(root)) {
     if (note.zone !== 'inbox' || !note.expires) continue;
     if (note.expires >= today) continue;
-    const name = note.path.split('/').pop()!;
-    renameSync(join(root, note.path), join(root, 'archive', `expired-${name}`));
-    moved.push(note.path);
+    const to = `archive/expired-${note.path.split('/').pop()!}`;
+    renameSync(join(root, note.path), join(root, to));
+    moved.push({ from: note.path, to });
   }
   return moved;
 }

@@ -145,9 +145,14 @@ describe('compileQuery: poisoning quarantine', () => {
 });
 
 describe('compileQuery: evidence gating', () => {
-  test('episodic phrasing surfaces session evidence', () => {
-    const b = compileQuery(db, { task: 'what did we try last time on the sca-deps queue jobs' });
+  test('episodic phrasing surfaces session evidence for its own project', () => {
+    const b = compileQuery(db, { task: 'what did we try last time on the sca-deps queue jobs', project: 'backslash' });
     expect(b.items.map((i) => i.id)).toContain('S-1');
+  });
+
+  test("project evidence stays behind the firewall when no project is given", () => {
+    const b = compileQuery(db, { task: 'what did we try last time on the sca-deps queue jobs' });
+    expect(b.items.map((i) => i.id)).not.toContain('S-1');
   });
 
   test('a plain implementation task does not surface sessions', () => {

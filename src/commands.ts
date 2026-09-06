@@ -6,7 +6,8 @@ import { compileQuery, expandItems } from './compile';
 import type { RetrieverFn } from './compile';
 import { buildIndex, getNoteByTitle, listNotes, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
-import { agentAuthor, authorsFor, commitAll, gitInit, TAL } from './git';
+import { agentAuthor, authorsFor, commitPaths, gitInit, TAL } from './git';
+import { withVaultLock } from './lock';
 import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { runProbes, quarantineBattery } from './evalrun';
@@ -140,7 +141,7 @@ export function cmdInit(root: string, _flags: string[]): number {
   writeIfMissing('_system/eval/probes.yaml', STARTER_PROBES);
   writeIfMissing('.gitignore', GITIGNORE);
   gitInit(root);
-  commitAll(root, 'engram: init vault skeleton');
+  commitPaths(root, ['.'], 'engram: init vault skeleton'); // a fresh vault: everything present is the skeleton
   console.log(`vault ready at ${root}`);
   console.log('zones: zettel/ maps/ (yours) · inbox/ evidence/ (agents) · _generated/ .index/ (disposable)');
   return 0;
@@ -175,7 +176,8 @@ export function cmdQuery(root: string, task: string, flags: Map<string, string |
 export function cmdExpand(root: string, ids: string[], flags: Map<string, string | boolean>): number {
   const db = buildDb(root);
   const budget = flags.has('budget') ? Number(flags.get('budget')) : undefined;
-  console.log(renderBundle(expandItems(db, ids, budget), flags.has('json') ? 'json' : 'markdown'));
+  const ctx = { project: flags.get('project') as string | undefined, includeHistory: flags.has('history') };
+  console.log(renderBundle(expandItems(db, ids, budget, ctx), flags.has('json') ? 'json' : 'markdown'));
   return 0;
 }
 
@@ -193,16 +195,23 @@ export function cmdSearch(root: string, terms: string): number {
 // ---------------------------------------------------------------- capture
 
 export function cmdNote(root: string, text: string): number {
-  const { path } = writeFleetingNote(root, text);
-  commitAll(root, `engram: fleeting note`, TAL);
+  const { path } = withVaultLock(root, () => {
+    const written = writeFleetingNote(root, text);
+    commitPaths(root, [written.path], `engram: fleeting note`, TAL);
+    return written;
+  });
   console.log(`captured ${path}`);
   return 0;
 }
 
 export function cmdRecord(root: string, payload: SessionPayload & { author?: string }): number {
-  const { path, id } = writeSessionRecord(root, payload);
-  commitAll(root, `engram(${payload.author ?? 'agent'}): record session ${id}`, agentAuthor(payload.author ?? 'agent'));
-  console.log(`recorded ${id} at ${path}`);
+  const author = payload.author ?? 'agent';
+  const { path, id, existed } = withVaultLock(root, () => {
+    const written = writeSessionRecord(root, payload);
+    if (!written.existed) commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
+    return written;
+  });
+  console.log(existed ? `already recorded ${id} at ${path} (externalId ${payload.externalId})` : `recorded ${id} at ${path}`);
   return 0;
 }
 
@@ -210,11 +219,14 @@ export function cmdPropose(
   root: string,
   payload: ({ kind: 'candidate' } & CandidatePayload) | ({ kind: 'link' } & LinkProposalPayload) | ({ kind: 'dispute' } & DisputePayload),
 ): number {
-  let result: { path: string; id: string };
-  if (payload.kind === 'candidate') result = writeCandidate(root, payload);
-  else if (payload.kind === 'link') result = writeLinkProposal(root, payload);
-  else result = writeDisputeProposal(root, payload);
-  commitAll(root, `engram(${payload.author}): propose ${payload.kind} ${result.id}`, agentAuthor(payload.author));
+  const result = withVaultLock(root, () => {
+    let written: { path: string; id: string };
+    if (payload.kind === 'candidate') written = writeCandidate(root, payload);
+    else if (payload.kind === 'link') written = writeLinkProposal(root, payload);
+    else written = writeDisputeProposal(root, payload);
+    commitPaths(root, [written.path], `engram(${payload.author}): propose ${payload.kind} ${written.id}`, agentAuthor(payload.author));
+    return written;
+  });
   console.log(`proposed ${result.id} at ${result.path} (pending your review)`);
   return 0;
 }
@@ -225,6 +237,25 @@ function candidateQueue(root: string) {
   return loadVaultNotes(root)
     .filter((n) => n.zone === 'inbox')
     .sort((a, b) => (a.created ?? '').localeCompare(b.created ?? ''));
+}
+
+/** The single door into zettel/: promote one inbox item and commit exactly its footprint. */
+function promote(root: string, inboxPath: string, approval: 'direct' | 'conversational'): string {
+  const id = inboxPath.split('/').pop()!.replace(/\.md$/, '');
+  return withVaultLock(root, () => {
+    const { zettelPath, archivePath } = promoteCandidate(root, inboxPath, { approval });
+    commitPaths(root, [zettelPath, archivePath, inboxPath], `engram: promote ${id} -> ${zettelPath} (approval: ${approval})`, TAL);
+    return zettelPath;
+  });
+}
+
+function reject(root: string, inboxPath: string): void {
+  const id = inboxPath.split('/').pop()!.replace(/\.md$/, '');
+  const archivePath = `archive/rejected-${inboxPath.split('/').pop()!}`;
+  withVaultLock(root, () => {
+    renameSync(join(root, inboxPath), join(root, archivePath));
+    commitPaths(root, [inboxPath, archivePath], `engram: reject ${id}`, TAL);
+  });
 }
 
 export function cmdReview(root: string, flags: Map<string, string | boolean>): number {
@@ -238,8 +269,7 @@ export function cmdReview(root: string, flags: Map<string, string | boolean>): n
       return 1;
     }
     const approval = flags.has('conversational') ? 'conversational' : 'direct';
-    const { zettelPath } = promoteCandidate(root, target.path, { approval: approval as 'direct' | 'conversational' });
-    commitAll(root, `engram: promote ${id} -> ${zettelPath} (approval: ${approval})`, TAL);
+    const zettelPath = promote(root, target.path, approval);
     console.log(`promoted -> ${zettelPath}`);
     return 0;
   }
@@ -251,9 +281,7 @@ export function cmdReview(root: string, flags: Map<string, string | boolean>): n
       console.error(`no inbox item with id ${id}`);
       return 1;
     }
-    const name = target.path.split('/').pop()!;
-    renameSync(join(root, target.path), join(root, 'archive', `rejected-${name}`));
-    commitAll(root, `engram: reject ${id}`, TAL);
+    reject(root, target.path);
     console.log(`rejected ${id}`);
     return 0;
   }
@@ -278,18 +306,15 @@ export function cmdReview(root: string, flags: Map<string, string | boolean>): n
     const answer = prompt(`[a]ccept  [r]eject  [o]pen in $EDITOR  [s]kip  [q]uit >`)?.trim().toLowerCase();
     if (answer === 'q') break;
     if (answer === 'a') {
-      const { zettelPath } = promoteCandidate(root, n.path, { approval: 'direct' });
-      commitAll(root, `engram: promote ${n.id} -> ${zettelPath} (approval: direct)`, TAL);
-      console.log(`promoted -> ${zettelPath}`);
+      console.log(`promoted -> ${promote(root, n.path, 'direct')}`);
       acted++;
     } else if (answer === 'r') {
-      renameSync(join(root, n.path), join(root, 'archive', `rejected-${n.path.split('/').pop()!}`));
-      commitAll(root, `engram: reject ${n.id}`, TAL);
+      reject(root, n.path);
       acted++;
     } else if (answer === 'o') {
       const editor = process.env['EDITOR'] ?? 'vi';
       Bun.spawnSync([editor, join(root, n.path)], { stdio: ['inherit', 'inherit', 'inherit'] });
-      commitAll(root, `engram: edit ${n.id} during review`, TAL);
+      withVaultLock(root, () => commitPaths(root, [n.path], `engram: edit ${n.id} during review`, TAL));
     }
   }
   console.log(`\nreview done — ${acted} item(s) resolved, ${candidateQueue(root).length} remaining`);
@@ -299,11 +324,14 @@ export function cmdReview(root: string, flags: Map<string, string | boolean>): n
 // ---------------------------------------------------------------- rebuild / stats / doctor / eval
 
 export function cmdRebuild(root: string): number {
-  const expired = expireCandidates(root);
-  if (expired.length > 0) {
-    commitAll(root, `engram: expire ${expired.length} candidate(s)`, TAL);
-    console.log(`expired ${expired.length} candidate(s) into archive/`);
-  }
+  const expired = withVaultLock(root, () => {
+    const moves = expireCandidates(root);
+    if (moves.length > 0) {
+      commitPaths(root, moves.flatMap((m) => [m.from, m.to]), `engram: expire ${moves.length} candidate(s)`, TAL);
+    }
+    return moves;
+  });
+  if (expired.length > 0) console.log(`expired ${expired.length} candidate(s) into archive/`);
 
   const notes = loadVaultNotes(root);
   const indexPath = join(root, '.index/graph.sqlite');

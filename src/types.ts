@@ -47,6 +47,10 @@ export interface ParsedNote {
   expires?: string;
   sourceTrust?: string;
   confidence?: string;
+  /** Caller-supplied idempotency key on session records (e.g. swarmforge:<project>:<task>). */
+  externalId?: string;
+  /** Content hash stored with externalId so a retried record can be told from a reused key. */
+  fingerprint?: string;
   sources: string[];
   tags: string[];
   supersedes: string[];

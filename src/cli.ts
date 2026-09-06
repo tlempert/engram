@@ -12,7 +12,8 @@ usage:
   engram init [path]                 scaffold a vault (default ~/engram or $ENGRAM_VAULT)
   engram query "task" [flags]        compile a minimal context bundle
       --project X --budget N --agent NAME --history --json
-  engram expand ID [ID…] [--budget N]  full content for known note ids
+  engram expand ID [ID…] [flags]     full content for known note ids
+      --project X --budget N --history   (same scope/status filters as query)
   engram search "terms"              raw retriever hits (debug)
   engram note "text"                 quick-capture a fleeting note (yours)
   engram review [flags]              curate the inbox (interactive on a TTY)
@@ -23,7 +24,8 @@ usage:
   engram stats                       zone/type/authorship counts
   engram doctor                      health & integrity checks
   engram eval                        run gold probes + quarantine battery
-  engram serve                       MCP server on stdio (memory_query/expand/record/propose)
+  engram serve [--read-only]         MCP server on stdio (memory_query/expand/record/propose)
+      --read-only                    expose only memory_query and memory_expand (swarm workers)
 `;
 
 function parseFlags(args: string[]): { positional: string[]; flags: Map<string, string | boolean> } {
@@ -98,7 +100,7 @@ async function main(): Promise<number> {
     case 'eval':
       return cmdEval(root);
     case 'serve':
-      await serveMcp(root);
+      await serveMcp(root, { readOnly: flags.has('read-only') });
       return 0;
     default:
       console.log(HELP);

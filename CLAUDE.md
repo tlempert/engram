@@ -31,6 +31,7 @@ The full architecture plan lives in the vault at `~/engram/PLAN.md`.
 | `src/evalrun.ts` | gold-probe runner + quarantine battery |
 | `src/qmd.ts` | qmd search adapter + RRF merge (retriever seam) |
 | `src/git.ts` | commits: `tal <tal@engram>` for human-gated, `<agent> <agent@engram>` for evidence |
+| `src/lock.ts` | vault-wide write lock: O_EXCL pid file, waiters poll, dead-owner locks reclaimed by rename |
 | `src/commands.ts` / `src/cli.ts` | command layer |
 | `src/mcp.ts` | stdio MCP: memory_query / memory_expand / memory_record / memory_propose |
 

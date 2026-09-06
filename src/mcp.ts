@@ -6,14 +6,15 @@ import { join } from 'path';
 import { compileQuery, expandItems } from './compile';
 import { buildIndex, getNoteByTitle, searchFts } from './db';
 import { loadConfig, loadPolicy } from './config';
-import { agentAuthor, commitAll } from './git';
+import { agentAuthor, commitPaths } from './git';
+import { withVaultLock } from './lock';
 import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { loadVaultNotes, writeCandidate, writeDisputeProposal, writeLinkProposal, writeSessionRecord } from './vault';
 import type { RetrieverFn } from './compile';
 import type { QueryRequest } from './types';
 
-const TOOLS = [
+const READ_TOOLS = [
   {
     name: 'memory_query',
     description:
@@ -33,16 +34,21 @@ const TOOLS = [
   },
   {
     name: 'memory_expand',
-    description: 'Fetch the full content of specific memory items by id (progressive disclosure after memory_query).',
+    description: 'Fetch the full content of specific memory items by id (progressive disclosure after memory_query). Pass the same project and includeHistory you queried with; expand enforces the same scope and status filters.',
     inputSchema: {
       type: 'object',
       properties: {
         ids: { type: 'array', items: { type: 'string' } },
         budget: { type: 'number' },
+        project: { type: 'string', description: 'Current project slug; unlocks project-scoped notes' },
+        includeHistory: { type: 'boolean', description: 'Allow superseded positions' },
       },
       required: ['ids'],
     },
   },
+];
+
+const WRITE_TOOLS = [
   {
     name: 'memory_record',
     description:
@@ -52,6 +58,10 @@ const TOOLS = [
       properties: {
         task: { type: 'string' },
         author: { type: 'string', description: 'Recording agent name' },
+        externalId: {
+          type: 'string',
+          description: 'Idempotency key (e.g. swarmforge:<project>:<task-id>). A retry with the same key and content returns the existing record; a reused key with different content is refused.',
+        },
         client: { type: 'string' },
         agents: { type: 'array', items: { type: 'string' } },
         project: { type: 'string' },
@@ -100,13 +110,27 @@ function text(s: string) {
   return { content: [{ type: 'text' as const, text: s }] };
 }
 
-export async function serveMcp(root: string): Promise<void> {
-  const server = new Server({ name: 'engram', version: '0.1.0' }, { capabilities: { tools: {} } });
+/** Failures are MCP errors, so a client never mistakes one for a successful write. */
+function failure(s: string) {
+  return { ...text(`engram error: ${s}`), isError: true };
+}
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+export interface ServeOptions {
+  /** Expose only memory_query and memory_expand, and write nothing into the vault. */
+  readOnly?: boolean;
+}
+
+export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<void> {
+  const server = new Server({ name: 'engram', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const tools = opts.readOnly ? READ_TOOLS : [...READ_TOOLS, ...WRITE_TOOLS];
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    if (opts.readOnly && WRITE_TOOLS.some((t) => t.name === req.params.name)) {
+      return failure(`this server is read-only; ${req.params.name} is unavailable`);
+    }
     try {
       switch (req.params.name) {
         case 'memory_query': {
@@ -128,42 +152,55 @@ export async function serveMcp(root: string): Promise<void> {
             includeHistory: args['includeHistory'] as boolean | undefined,
           };
           const bundle = compileQuery(db, request, loadPolicy(root, request.agent), retriever);
-          try {
-            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-            mkdirSync(join(root, '_generated/bundles'), { recursive: true });
-            writeFileSync(join(root, `_generated/bundles/${stamp}.json`), JSON.stringify({ req: request, bundle }, null, 2));
-          } catch {
-            // telemetry only
+          if (!opts.readOnly) {
+            try {
+              const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+              mkdirSync(join(root, '_generated/bundles'), { recursive: true });
+              writeFileSync(join(root, `_generated/bundles/${stamp}.json`), JSON.stringify({ req: request, bundle }, null, 2));
+            } catch {
+              // telemetry only
+            }
           }
           return text(renderBundle(bundle, args['format'] === 'json' ? 'json' : 'markdown'));
         }
         case 'memory_expand': {
           const db = buildIndex(loadVaultNotes(root));
-          const bundle = expandItems(db, (args['ids'] as string[]) ?? [], args['budget'] as number | undefined);
+          const bundle = expandItems(db, (args['ids'] as string[]) ?? [], args['budget'] as number | undefined, {
+            project: args['project'] as string | undefined,
+            includeHistory: args['includeHistory'] as boolean | undefined,
+          });
           return text(renderBundle(bundle, 'markdown'));
         }
         case 'memory_record': {
           const author = String(args['author'] ?? 'agent');
-          const { id, path } = writeSessionRecord(root, args as never);
-          commitAll(root, `engram(${author}): record session ${id}`, agentAuthor(author));
-          return text(`recorded ${id} at ${path}`);
+          const { id, path, existed } = withVaultLock(root, () => {
+            const written = writeSessionRecord(root, args as never);
+            if (!written.existed) commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
+            return written;
+          });
+          return text(existed ? `already recorded ${id} at ${path} (externalId ${String(args['externalId'])})` : `recorded ${id} at ${path}`);
         }
         case 'memory_propose': {
           const author = String(args['author'] ?? 'agent');
           const kind = String(args['kind']);
-          let result: { id: string; path: string };
-          if (kind === 'candidate') result = writeCandidate(root, args as never);
-          else if (kind === 'link') result = writeLinkProposal(root, args as never);
-          else if (kind === 'dispute') result = writeDisputeProposal(root, args as never);
-          else return text(`unknown proposal kind: ${kind}`);
-          commitAll(root, `engram(${author}): propose ${kind} ${result.id}`, agentAuthor(author));
+          const write =
+            kind === 'candidate' ? () => writeCandidate(root, args as never)
+            : kind === 'link' ? () => writeLinkProposal(root, args as never)
+            : kind === 'dispute' ? () => writeDisputeProposal(root, args as never)
+            : null;
+          if (!write) return failure(`unknown proposal kind: ${kind}`);
+          const result = withVaultLock(root, () => {
+            const written = write();
+            commitPaths(root, [written.path], `engram(${author}): propose ${kind} ${written.id}`, agentAuthor(author));
+            return written;
+          });
           return text(`proposed ${result.id} (pending user review — it will not affect retrieval until promoted)`);
         }
         default:
-          return text(`unknown tool: ${req.params.name}`);
+          return failure(`unknown tool: ${req.params.name}`);
       }
     } catch (e) {
-      return text(`engram error: ${(e as Error).message}`);
+      return failure((e as Error).message);
     }
   });
 
