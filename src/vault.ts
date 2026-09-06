@@ -51,21 +51,46 @@ function ymdCompact(d: Date): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
+/** A path that was listed but is gone by the time we touch it: a concurrent move, not an error. */
+function vanished(e: unknown): boolean {
+  return (e as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
 function walk(dir: string, rel: string, out: { rel: string; abs: string }[]): void {
   if (!existsSync(dir)) return;
   for (const entry of readdirSync(dir)) {
     if (entry.startsWith('.') || entry.startsWith('_')) continue;
     const abs = join(dir, entry);
     const relPath = rel ? `${rel}/${entry}` : entry;
-    if (statSync(abs).isDirectory()) walk(abs, relPath, out);
+    let isDir: boolean;
+    try {
+      isDir = statSync(abs).isDirectory();
+    } catch (e) {
+      if (vanished(e)) continue;
+      throw e;
+    }
+    if (isDir) walk(abs, relPath, out);
     else if (entry.toLowerCase().endsWith('.md')) out.push({ rel: relPath, abs });
   }
 }
 
+/**
+ * Reads take no lock; promotion, rejection, and expiry rename files under a
+ * running scan. Whatever vanishes mid-scan is skipped — the next query sees
+ * the settled state — instead of failing the whole read.
+ */
 export function loadVaultNotes(root: string): ParsedNote[] {
   const files: { rel: string; abs: string }[] = [];
   for (const zone of CONTENT_ZONES) walk(join(root, zone), zone, files);
-  return files.map((f) => parseNote(readFileSync(f.abs, 'utf8'), f.rel));
+  const notes: ParsedNote[] = [];
+  for (const f of files) {
+    try {
+      notes.push(parseNote(readFileSync(f.abs, 'utf8'), f.rel));
+    } catch (e) {
+      if (!vanished(e)) throw e;
+    }
+  }
+  return notes;
 }
 
 /** Frontmatter serialized with stable key order; undefined values dropped. */
