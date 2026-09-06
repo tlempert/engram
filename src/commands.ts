@@ -176,7 +176,8 @@ export function cmdQuery(root: string, task: string, flags: Map<string, string |
 export function cmdExpand(root: string, ids: string[], flags: Map<string, string | boolean>): number {
   const db = buildDb(root);
   const budget = flags.has('budget') ? Number(flags.get('budget')) : undefined;
-  console.log(renderBundle(expandItems(db, ids, budget), flags.has('json') ? 'json' : 'markdown'));
+  const ctx = { project: flags.get('project') as string | undefined, includeHistory: flags.has('history') };
+  console.log(renderBundle(expandItems(db, ids, budget, ctx), flags.has('json') ? 'json' : 'markdown'));
   return 0;
 }
 

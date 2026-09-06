@@ -174,8 +174,17 @@ export function compileQuery(
 
 const EXPANDABLE_ZONES = new Set(['zettel', 'maps', 'evidence']);
 
-/** Progressive disclosure: fetch full content for known ids. Quarantine still holds. */
-export function expandItems(db: Database, ids: string[], budget = 2000): Bundle {
+export interface ExpandContext {
+  project?: string;
+  includeHistory?: boolean;
+}
+
+/**
+ * Progressive disclosure: fetch full content for known ids. The same hard
+ * filters as query apply — quarantine, scope, status — so knowing an id
+ * (from a citation, a log, a guess) never grants more than a query would.
+ */
+export function expandItems(db: Database, ids: string[], budget = 2000, ctx: ExpandContext = {}): Bundle {
   const requested = Math.min(budget, ABSOLUTE_BUDGET_CAP);
   const items: BundleItem[] = [];
   const insufficiencies: string[] = [];
@@ -189,8 +198,11 @@ export function expandItems(db: Database, ids: string[], budget = 2000): Bundle 
       insufficiencies.push(`no note with id "${id}"`);
       continue;
     }
-    if (!EXPANDABLE_ZONES.has(note.zone) || note.origin === 'agent-inferred') {
-      insufficiencies.push(`"${id}" is not expandable (unaccepted or quarantined content)`);
+    const quarantined = !EXPANDABLE_ZONES.has(note.zone) || note.origin === 'agent-inferred';
+    const outOfScope = !scopeAllowed(note.scope, ctx.project);
+    const historical = note.status === 'superseded' && !ctx.includeHistory;
+    if (quarantined || outOfScope || historical) {
+      insufficiencies.push(`"${id}" is not expandable (unaccepted, quarantined, out-of-scope, or superseded content)`);
       continue;
     }
     const tokens = note.tokens;

@@ -190,6 +190,7 @@ export function writeSessionRecord(root: string, payload: SessionPayload, now: D
     client: payload.client,
     agents: payload.agents,
     project: payload.project,
+    scope: payload.project ? `project:${payload.project}` : 'global',
     outcome: payload.outcome,
     created: ymd(now),
     transcript: payload.transcript,

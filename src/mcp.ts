@@ -34,12 +34,14 @@ const READ_TOOLS = [
   },
   {
     name: 'memory_expand',
-    description: 'Fetch the full content of specific memory items by id (progressive disclosure after memory_query).',
+    description: 'Fetch the full content of specific memory items by id (progressive disclosure after memory_query). Pass the same project and includeHistory you queried with; expand enforces the same scope and status filters.',
     inputSchema: {
       type: 'object',
       properties: {
         ids: { type: 'array', items: { type: 'string' } },
         budget: { type: 'number' },
+        project: { type: 'string', description: 'Current project slug; unlocks project-scoped notes' },
+        includeHistory: { type: 'boolean', description: 'Allow superseded positions' },
       },
       required: ['ids'],
     },
@@ -163,7 +165,10 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
         }
         case 'memory_expand': {
           const db = buildIndex(loadVaultNotes(root));
-          const bundle = expandItems(db, (args['ids'] as string[]) ?? [], args['budget'] as number | undefined);
+          const bundle = expandItems(db, (args['ids'] as string[]) ?? [], args['budget'] as number | undefined, {
+            project: args['project'] as string | undefined,
+            includeHistory: args['includeHistory'] as boolean | undefined,
+          });
           return text(renderBundle(bundle, 'markdown'));
         }
         case 'memory_record': {

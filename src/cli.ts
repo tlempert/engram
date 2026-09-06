@@ -12,7 +12,8 @@ usage:
   engram init [path]                 scaffold a vault (default ~/engram or $ENGRAM_VAULT)
   engram query "task" [flags]        compile a minimal context bundle
       --project X --budget N --agent NAME --history --json
-  engram expand ID [ID…] [--budget N]  full content for known note ids
+  engram expand ID [ID…] [flags]     full content for known note ids
+      --project X --budget N --history   (same scope/status filters as query)
   engram search "terms"              raw retriever hits (debug)
   engram note "text"                 quick-capture a fleeting note (yours)
   engram review [flags]              curate the inbox (interactive on a TTY)
