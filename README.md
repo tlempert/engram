@@ -60,6 +60,35 @@ Optional:
   `retriever: auto` in `_system/config.yaml`. Without qmd, built-in SQLite
   FTS5 (porter) does the searching.
 
+### SwarmForge (six-pack) integration
+
+`swarmforge/` vendors the pieces a [SwarmForge](https://github.com/unclebob/swarm-forge)
+pack needs to share this vault. SwarmForge already owns coordination (board,
+handoffs, worktrees); Engram supplies memory. Workers only read; one recorder
+writes.
+
+```bash
+# in the project that has the six-pack installed
+cp <engram>/swarmforge/local-memory.prompt swarmforge/constitution/articles/
+cp <engram>/swarmforge/engram-mcp.json swarmforge/
+# give every role the read-only server via backend args; see swarmforge.conf.example
+# after a card reaches Done (or on a timer):
+bun <engram>/swarmforge/record-cards.ts --root . --slug <project-slug>
+```
+
+- `local-memory.prompt` is a pack-owned constitution article: query once per
+  forward task, never on merge-only handbacks or restarts, never write.
+- `engram-mcp.json` plus the conf example give each role `engram serve
+  --read-only` through backend arguments, so your own user-scope MCP entry
+  (full read/write) is untouched.
+- `record-cards.ts` files one session record per Done card, built from the
+  operator's task document and the completed handoffs, keyed by
+  `swarmforge:<slug>:<task-id>`. Idempotent: re-running records nothing new,
+  and a lost `.swarmforge/memory/recorded/` marker is reconciled through
+  the key instead of duplicating.
+
+Before the first swarm run, pin `retriever: fts5` in `_system/config.yaml`.
+
 ### A second machine and your vault
 
 The vault is a separate, private Git repo — it is *not* part of this code

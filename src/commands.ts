@@ -16,7 +16,7 @@ import {
   expireCandidates, loadVaultNotes, promoteCandidate, writeCandidate,
   writeDisputeProposal, writeFleetingNote, writeLinkProposal, writeSessionRecord,
 } from './vault';
-import type { CandidatePayload, DisputePayload, LinkProposalPayload, SessionPayload } from './vault';
+import type { CandidatePayload, DisputePayload, LinkProposalPayload, SessionPayload, WrittenRecord } from './vault';
 import type { QueryRequest } from './types';
 
 const ZONE_DIRS = [
@@ -204,13 +204,18 @@ export function cmdNote(root: string, text: string): number {
   return 0;
 }
 
-export function cmdRecord(root: string, payload: SessionPayload & { author?: string }): number {
+/** Append a session record and commit it as the recording agent — the one write path for evidence. */
+export function recordSession(root: string, payload: SessionPayload & { author?: string }): WrittenRecord {
   const author = payload.author ?? 'agent';
-  const { path, id, existed } = withVaultLock(root, () => {
+  return withVaultLock(root, () => {
     const written = writeSessionRecord(root, payload);
     if (!written.existed) commitPaths(root, [written.path], `engram(${author}): record session ${written.id}`, agentAuthor(author));
     return written;
   });
+}
+
+export function cmdRecord(root: string, payload: SessionPayload & { author?: string }): number {
+  const { path, id, existed } = recordSession(root, payload);
   console.log(existed ? `already recorded ${id} at ${path} (externalId ${payload.externalId})` : `recorded ${id} at ${path}`);
   return 0;
 }
