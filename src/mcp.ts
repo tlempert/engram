@@ -3,15 +3,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { chooseRetriever } from './commands';
 import { compileQuery, expandItems } from './compile';
-import { buildIndex, getNoteByTitle, searchFts } from './db';
-import { loadConfig, loadPolicy } from './config';
+import { buildIndex } from './db';
+import { loadPolicy } from './config';
 import { agentAuthor, commitPaths } from './git';
 import { withVaultLock } from './lock';
-import { fuseRetrievers, qmdBinaryAvailable, qmdCollectionsRegistered, qmdSearch } from './qmd';
 import { renderBundle } from './render';
 import { loadVaultNotes, writeCandidate, writeDisputeProposal, writeLinkProposal, writeSessionRecord } from './vault';
-import type { RetrieverFn } from './compile';
 import type { QueryRequest } from './types';
 
 const READ_TOOLS = [
@@ -135,15 +134,7 @@ export async function serveMcp(root: string, opts: ServeOptions = {}): Promise<v
       switch (req.params.name) {
         case 'memory_query': {
           const db = buildIndex(loadVaultNotes(root)); // fresh per call — no stale index, ever
-          const config = loadConfig(root);
-          let retriever: RetrieverFn | undefined;
-          if (config.retriever !== 'fts5' && qmdBinaryAvailable() && qmdCollectionsRegistered()) {
-            retriever = (t, z, l) => {
-              const fts = searchFts(db, t, z, l);
-              const qmd = qmdSearch(t, z, l, (title) => getNoteByTitle(db, title)?.path ?? null);
-              return fuseRetrievers(fts, qmd).slice(0, l);
-            };
-          }
+          const { fn: retriever } = chooseRetriever(db, root);
           const request: QueryRequest = {
             task: String(args['task'] ?? ''),
             agent: args['agent'] as string | undefined,

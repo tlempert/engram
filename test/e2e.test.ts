@@ -96,6 +96,12 @@ describe('engram end-to-end', () => {
     expect(r.out).not.toMatch(/VIOLATION/);
   });
 
+  test('doctor reports the retriever the config selects, not merely what is installed', () => {
+    // config.yaml was pinned to fts5 above; qmd may well be installed and registered on this machine.
+    const r = engram('doctor');
+    expect(r.out).toMatch(/^retriever: fts5/m);
+  });
+
   test('eval runs the starter probes without failures', () => {
     const r = engram('eval');
     expect(r.code).toBe(0);
