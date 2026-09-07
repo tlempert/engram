@@ -34,6 +34,7 @@ The full architecture plan lives in the vault at `~/engram/PLAN.md`.
 | `src/lock.ts` | vault-wide write lock: O_EXCL pid file, waiters poll, dead-owner locks reclaimed by rename |
 | `src/commands.ts` / `src/cli.ts` | command layer |
 | `src/mcp.ts` | stdio MCP: memory_query / memory_expand / memory_record / memory_propose |
+| `swarmforge/` | SwarmForge kit: memory article for roles, read-only MCP config, `record-cards.ts` (one record per Done card, externalId-keyed) |
 
 ## Rules
 
