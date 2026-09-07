@@ -111,10 +111,13 @@ function buildDb(root: string): Database {
   return buildIndex(loadVaultNotes(root));
 }
 
-function chooseRetriever(db: Database, root: string): { fn: RetrieverFn | undefined; engine: string } {
-  const config = loadConfig(root);
-  const wantQmd = config.retriever === 'qmd' || config.retriever === 'auto';
-  if (wantQmd && qmdBinaryAvailable() && qmdCollectionsRegistered()) {
+/** qmd is active only when the config allows it AND the binary and engram-* collections exist. */
+function qmdActive(root: string): boolean {
+  return loadConfig(root).retriever !== 'fts5' && qmdBinaryAvailable() && qmdCollectionsRegistered();
+}
+
+export function chooseRetriever(db: Database, root: string): { fn: RetrieverFn | undefined; engine: string } {
+  if (qmdActive(root)) {
     const fn: RetrieverFn = (terms, zones, limit) => {
       const fts = searchFts(db, terms, zones, limit);
       const qmd = qmdSearch(terms, zones, limit, (t) => getNoteByTitle(db, t)?.path ?? null);
@@ -358,7 +361,7 @@ export function cmdRebuild(root: string): number {
     ].join('\n'),
   );
 
-  if (loadConfig(root).retriever !== 'fts5' && qmdBinaryAvailable() && qmdCollectionsRegistered()) {
+  if (qmdActive(root)) {
     Bun.spawnSync(['qmd', 'update']);
     console.log('qmd collections updated');
   }
@@ -451,8 +454,9 @@ export function cmdDoctor(root: string): number {
     }
   }
 
-  const qmdReady = qmdBinaryAvailable() && qmdCollectionsRegistered();
-  console.log(`retriever: ${qmdReady ? 'qmd+fts5 (rrf)' : 'fts5'}${qmdReady ? '' : ' — to enable qmd, register collections named engram-zettel / engram-maps / engram-evidence pointing at those vault folders (see qmd collection add), then set retriever: qmd|auto'}`);
+  if (qmdActive(root)) console.log('retriever: qmd+fts5 (rrf)');
+  else if (loadConfig(root).retriever === 'fts5') console.log('retriever: fts5 (pinned in _system/config.yaml)');
+  else console.log('retriever: fts5 — to enable qmd, register collections named engram-zettel / engram-maps / engram-evidence pointing at those vault folders (see qmd collection add), then set retriever: qmd|auto');
   console.log(`doctor: ${violations} violation(s), ${warnings} warning(s) across ${notes.length} notes`);
   return violations > 0 ? 1 : 0;
 }
