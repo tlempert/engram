@@ -3,12 +3,12 @@
 #
 # Every role gets the read-only Engram server through backend arguments, so
 # the operator's own user-scope MCP config (full read/write) is untouched:
-#   codex   -c 'mcp_servers.engram.command="/Users/tallempert/.bun/bin/engram"' -c 'mcp_servers.engram.args=["serve","--read-only"]'
+#   codex   -c 'mcp_servers.engram.command="engram"' -c 'mcp_servers.engram.args=["serve","--read-only"]'
 #   claude  --strict-mcp-config --mcp-config <project>/swarmforge/engram-mcp.json
 # The launcher adds --yolo / --permission-mode bypassPermissions itself.
-window-invisible specifier codex master -c mcp_servers.engram.command="/Users/tallempert/.bun/bin/engram" -c mcp_servers.engram.args=["serve","--read-only"]
+window-invisible specifier codex master -c mcp_servers.engram.command="engram" -c mcp_servers.engram.args=["serve","--read-only"]
 window-invisible coder claude coder --strict-mcp-config --mcp-config swarmforge/engram-mcp.json
 window-invisible cleaner claude cleaner batch back-one --strict-mcp-config --mcp-config swarmforge/engram-mcp.json
 window-invisible architect claude architect batch back-all --strict-mcp-config --mcp-config swarmforge/engram-mcp.json
-window-invisible hardender codex hardender batch -c mcp_servers.engram.command="/Users/tallempert/.bun/bin/engram" -c mcp_servers.engram.args=["serve","--read-only"]
+window-invisible hardender codex hardender batch -c mcp_servers.engram.command="engram" -c mcp_servers.engram.args=["serve","--read-only"]
 window-invisible QA claude QA batch back-all --strict-mcp-config --mcp-config swarmforge/engram-mcp.json

@@ -45,11 +45,18 @@ claude mcp add --scope user engram -- ~/.bun/bin/engram serve
 cp -r skill ~/.claude/skills/engram
 ```
 
-Any other MCP client (Codex, OpenCode, …) points at the same command:
-`~/.bun/bin/engram serve` over stdio, tools `memory_query`, `memory_expand`,
-`memory_record`, `memory_propose`. Unattended agents (swarm workers) get
-`engram serve --read-only`, which exposes only the two read tools and writes
-nothing into the vault.
+Wire it into Codex the same way (full read/write for your own sessions):
+
+```bash
+codex mcp add engram -- ~/.bun/bin/engram serve
+```
+
+and give Codex the protocol by copying `skill/SKILL.md` into a Codex skill
+directory or your `AGENTS.md`. Any other MCP client (OpenCode, …) points at
+the same command: `~/.bun/bin/engram serve` over stdio, tools `memory_query`,
+`memory_expand`, `memory_record`, `memory_propose`. Unattended agents (swarm
+workers) get `engram serve --read-only`, which exposes only the two read
+tools and writes nothing into the vault.
 
 Optional:
 
@@ -67,7 +74,14 @@ pack needs to share this vault. SwarmForge already owns coordination (board,
 handoffs, worktrees); Engram supplies memory. Workers only read; one recorder
 writes.
 
+SwarmForge prerequisites beyond Engram's: `zsh`, `tmux`, Babashka (`bb`), the
+`get-swarm-forge` helper on PATH (see its README), and the `codex` and
+`claude` CLIs. The kit assumes `engram` is on PATH (`bun link` above); the
+six-pack's default Grok roles are reassigned to Codex and Claude in the
+example conf.
+
 ```bash
+brew install tmux borkdude/brew/babashka
 # in the project that has the six-pack installed
 cp <engram>/swarmforge/local-memory.prompt swarmforge/constitution/articles/
 cp <engram>/swarmforge/engram-mcp.json swarmforge/
