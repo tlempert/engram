@@ -43,6 +43,13 @@ describe('expandItems', () => {
     expect(b.insufficiencies.join(' ')).toMatch(/not expandable|quarantined|no expandable/i);
   });
 
+  test('a quarantined refusal names quarantine, not scope or history', () => {
+    const msg = expandItems(db, ['c99'], 4000).insufficiencies.join(' ');
+    expect(msg).toMatch(/quarantined/i);
+    expect(msg).toContain('engram review');
+    expect(msg).not.toMatch(/out of scope|superseded/i);
+  });
+
   test('budget still caps expansion', () => {
     const b = expandItems(db, ['i1'], 50);
     expect(b.budget.used).toBeLessThanOrEqual(50);

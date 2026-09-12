@@ -81,3 +81,19 @@ describe('expand applies the same filters as query', () => {
     expect(expandItems(db, ['S-B'], 4000, { project: 'project-a' }).items).toHaveLength(0);
   });
 });
+
+describe('expand refusals name the actual reason and the flag that lifts it', () => {
+  test('an out-of-scope note says so and points at --project', () => {
+    const msg = expandItems(db, ['o1'], 4000).insufficiencies.join(' ');
+    expect(msg).toMatch(/out of scope/i);
+    expect(msg).toContain('--project');
+    expect(msg).not.toMatch(/superseded|quarantined/i);
+  });
+
+  test('a superseded note says so and points at --history', () => {
+    const msg = expandItems(db, ['old1'], 4000).insufficiencies.join(' ');
+    expect(msg).toMatch(/superseded/i);
+    expect(msg).toContain('--history');
+    expect(msg).not.toMatch(/out of scope|quarantined/i);
+  });
+});

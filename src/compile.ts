@@ -198,11 +198,18 @@ export function expandItems(db: Database, ids: string[], budget = 2000, ctx: Exp
       insufficiencies.push(`no note with id "${id}"`);
       continue;
     }
-    const quarantined = !EXPANDABLE_ZONES.has(note.zone) || note.origin === 'agent-inferred';
-    const outOfScope = !scopeAllowed(note.scope, ctx.project);
-    const historical = note.status === 'superseded' && !ctx.includeHistory;
-    if (quarantined || outOfScope || historical) {
-      insufficiencies.push(`"${id}" is not expandable (unaccepted, quarantined, out-of-scope, or superseded content)`);
+    const reasons: string[] = [];
+    if (!EXPANDABLE_ZONES.has(note.zone) || note.origin === 'agent-inferred') {
+      reasons.push('quarantined (unaccepted candidate — promote it with `engram review`)');
+    }
+    if (!scopeAllowed(note.scope, ctx.project)) {
+      reasons.push('out of scope (pass --project for project-scoped notes)');
+    }
+    if (note.status === 'superseded' && !ctx.includeHistory) {
+      reasons.push('superseded (pass --history to include it)');
+    }
+    if (reasons.length > 0) {
+      insufficiencies.push(`"${id}" is not expandable: ${reasons.join('; ')}`);
       continue;
     }
     const tokens = note.tokens;
